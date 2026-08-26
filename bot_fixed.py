@@ -291,8 +291,7 @@ async def rectop(interaction: nextcord.Interaction):
             medal = "🥇" if position == 1 else "🥈" if position == 2 else "🥉" if position == 3 else f"**{position}.**"
             word = "заявка" if count == 1 else "заявки" if 2 <= count <= 4 else "заявок"
             lines.append(f"{medal} {name} — **{count} {word}**")
-        embed.description = "
-".join(lines)
+        embed.description = "".join(lines)
     embed.set_footer(text="Статистика за последние 7 дней")
     await interaction.followup.send(embed=embed)
 
