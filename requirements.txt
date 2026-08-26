@@ -4,3 +4,4 @@ nextcord
 sys
 logging
 asyncio
+re
