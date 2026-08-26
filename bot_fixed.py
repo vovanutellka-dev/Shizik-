@@ -1,5 +1,6 @@
 import nextcord
 from nextcord.ext import commands
+from nextcord import SlashOption
 import logging
 import sys
 import asyncio
@@ -10,7 +11,8 @@ from collections import Counter
 # =========================
 # НАСТРОЙКИ И КОНСТАНТЫ
 # =========================
-TOKEN = ""
+# ⚠️ ВНИМАНИЕ: Замените этот токен на НОВЫЙ! Старый токен из вашего вопроса заблокирован или небезопасен.
+TOKEN = "ВАШ_НОВЫЙ_ТОКЕН_БОТА"
 
 WELCOME_CHANNEL_ID = 1541835086138187846
 CHANNEL_TICKET = 1541859646720184391
@@ -34,9 +36,9 @@ logging.basicConfig(
 logger = logging.getLogger("SHIZO_BOT")
 
 # =========================
-# ИНИЦИАЛИЗАЦИЯ БОТА (ОДИН РАЗ)
+# ИНИЦИАЛИЗАЦИЯ БОТА
 # =========================
-intents = nextcord.Intents.all()  # Включаем все интенты для корректной работы с пользователями
+intents = nextcord.Intents.all()
 
 bot = commands.Bot(
     command_prefix="!", 
@@ -123,20 +125,13 @@ class TicketControlView(nextcord.ui.View):
         self.applicant_id = applicant_id
 
     async def interaction_check(self, interaction: nextcord.Interaction) -> bool:
-        """
-        Проверяет, имеет ли пользователь право управлять этой заявкой.
-        Доступ разрешен Администраторам и пользователям с ролью ROLE_TO_PING_ID.
-        """
-        # Если пользователь администратор, разрешаем доступ
         if interaction.user.guild_permissions.administrator:
             return True
             
-        # Проверяем наличие роли рекрутера/модератора по ID
         allowed_role = interaction.guild.get_role(ROLE_TO_PING_ID)
         if allowed_role and allowed_role in interaction.user.roles:
             return True
             
-        # Если проверки не пройдены, отправляем скрытое сообщение и блокируем действие
         await interaction.response.send_message(
             "❌ У вас нет прав для взаимодействия с этой заявкой.", 
             ephemeral=True
@@ -174,7 +169,6 @@ class TicketControlView(nextcord.ui.View):
 
             await log_channel.send(embed=log_embed)
 
-        # Сначала редактируем интерфейс, отключая кнопки
         message = interaction.message
         embed = message.embeds[0]
         embed.color = nextcord.Color.green()
@@ -186,7 +180,6 @@ class TicketControlView(nextcord.ui.View):
         await message.edit(embed=embed, view=self)
         await interaction.channel.send("🟢 Заявка одобрена. Этот канал будет удален через 5 секунд...")
 
-        # Задержка перед удалением канала, чтобы Discord успел обновить API сообщения
         await asyncio.sleep(5)
         try:
             await interaction.channel.delete()
@@ -251,7 +244,7 @@ class TicketControlView(nextcord.ui.View):
             await interaction.channel.send("⚠️ Пользователь не найден на сервере.")
 
 # =========================
-# СЛЭШ-КОМАНДЫ И ДИРЕКТИВЫ
+# СЛЭШ-КОМАНДЫ
 # =========================
 @bot.slash_command(name="rectop", description="Показывает топ рекрутов за последние 7 дней")
 @commands.has_permissions(administrator=True)
@@ -290,7 +283,7 @@ async def rectop(interaction: nextcord.Interaction):
             name = member.mention if member else f"<@{moderator_id}>"
             medal = "🥇" if position == 1 else "🥈" if position == 2 else "🥉" if position == 3 else f"**{position}.**"
             word = "заявка" if count == 1 else "заявки" if 2 <= count <= 4 else "заявок"
-            lines.append(f"{medal} {name} — **{count} {word}**")
+            lines.append(f"{medal} {name} — **{count} {word}**\n")
         embed.description = "".join(lines)
     embed.set_footer(text="Статистика за последние 7 дней")
     await interaction.followup.send(embed=embed)
@@ -311,124 +304,70 @@ async def setup(ctx):
     except nextcord.NotFound:
         pass
 
+@bot.slash_command(name="embed", description="Создать Embed")
+async def embed(
+    interaction: nextcord.Interaction,
+    title: str = SlashOption(description="Заголовок Embed"),
+    description: str = SlashOption(description="Описание Embed"),
+    color: str = SlashOption(description="Цвет HEX, например #5865F2", default="#5865F2"),
+    image: str = SlashOption(description="URL картинки", required=False, default=None),
+    url: str = SlashOption(description="Ссылка", required=False, default=None),
+    footer: str = SlashOption(description="Текст внизу Embed", required=False, default=None)
+):
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("❌ У тебя нет прав администратора.", ephemeral=True)
+        return
+
+    try:
+        color_value = int(color.replace("#", ""), 16)
+        if not 0 <= color_value <= 0xFFFFFF:
+            raise ValueError
+    except ValueError:
+        await interaction.response.send_message("❌ Неверный HEX-цвет. Пример: #5865F2", ephemeral=True)
+        return
+
+    embed = nextcord.Embed(title=title, description=description, color=color_value, url=url)
+
+    if image:
+        embed.set_image(url=image)
+    if footer:
+        embed.set_footer(text=footer)
+
+    embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
+    await interaction.response.send_message(embed=embed)
+
 # =========================
-# ЕДИНЫЙ ОБРАБОТЧИК ON_READY
+# ЕДИНЫЕ ОБРАБОТЧИКИ СОБЫТИЙ
 # =========================
 @bot.event
 async def on_ready():
     logger.info("========================================")
     logger.info("БОТ УСПЕШНО ЗАПУЩЕН")
     logger.info(f"Имя бота: {bot.user}")
-    logger.info(f"ID бота: {bot.user.id}")
-    logger.info(f"Серверов: {len(bot.guilds)}")
     logger.info("========================================")
     
-    # Регистрируем View для персистентности (чтобы кнопки работали после перезагрузки)
     bot.add_view(StartAppView())
-    
+
 @bot.event
 async def on_member_join(member: nextcord.Member):
+    logger.info(f"👤 На сервер зашел пользователь: {member} (ID: {member.id})")
+    channel = member.guild.get_channel(WELCOME_CHANNEL_ID)
 
-    logger.info("========================================")
-    logger.info("СРАБОТАЛО СОБЫТИЕ on_member_join")
-    logger.info(f"Пользователь: {member}")
-    logger.info(f"Имя: {member.name}")
-    logger.info(f"ID пользователя: {member.id}")
-    logger.info(f"Сервер: {member.guild.name}")
-    logger.info(f"ID сервера: {member.guild.id}")
-    logger.info("========================================")
-
-    # Получаем канал
-    logger.info(
-        f"Ищу канал с ID: {WELCOME_CHANNEL_ID}"
-    )
-
-    channel = member.guild.get_channel(
-        WELCOME_CHANNEL_ID
-    )
-
-    # Канал не найден
     if channel is None:
-
-        logger.error(
-            "❌ КАНАЛ НЕ НАЙДЕН!"
-        )
-
-        logger.error(
-            f"Проверь WELCOME_CHANNEL_ID: "
-            f"{WELCOME_CHANNEL_ID}"
-        )
-
+        logger.error(f"❌ Канал приветствий {WELCOME_CHANNEL_ID} не найден!")
         return
 
-    logger.info(
-        f"✅ Канал найден: #{channel.name}"
-    )
-
-    # =========================
-    # СОЗДАЁМ EMBED
-    # =========================
-
     embed = nextcord.Embed(
-        title="Добро пожаловать на server SHIZO family",
-
-        description=(
-            f"{member.mention}, чтобы подать заявку "
-            f"в нашу семью зайди в канал "
-            f"<#1541859646720184391>"
-        ),
-
+        title="Добро пожаловать на сервер SHIZO family",
+        description=f"{member.mention}, чтобы подать заявку в нашу семью зайди в канал <#{CHANNEL_TICKET}>",
         color=0x800000
     )
 
-    logger.info(
-        "Embed создан"
-    )
-
-    # =========================
-    # ОТПРАВКА
-    # =========================
-
     try:
-
-        logger.info(
-            f"Пытаюсь отправить Embed "
-            f"в #{channel.name}"
-        )
-
-        message = await channel.send(
-            embed=embed
-        )
-
-        logger.info(
-            f"✅ EMBED ОТПРАВЛЕН!"
-        )
-
-        logger.info(
-            f"ID сообщения: {message.id}"
-        )
-
-    except nextcord.Forbidden:
-
-        logger.error(
-            "❌ Discord запретил отправку сообщения!"
-        )
-
-        logger.error(
-            "Проверь права Send Messages и Embed Links."
-        )
-
-    except nextcord.HTTPException as error:
-
-        logger.error(
-            f"❌ Ошибка Discord API: {error}"
-        )
-
+        await channel.send(embed=embed)
+        logger.info(f"✅ Приветствие для {member.name} отправлено.")
     except Exception as error:
-
-        logger.exception(
-            f"❌ НЕИЗВЕСТНАЯ ОШИБКА: {error}"
-        )
+        logger.error(f"❌ Ошибка отправки приветствия: {error}")
 
 # =========================
 # ЗАПУСК БОТА
