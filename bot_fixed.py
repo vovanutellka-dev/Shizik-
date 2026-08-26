@@ -10,7 +10,7 @@ from collections import Counter
 # =========================
 # НАСТРОЙКИ И КОНСТАНТЫ
 # =========================
-TOKEN = "MTU0MT... Ваши данные скрыты ..."
+TOKEN = ""
 
 WELCOME_CHANNEL_ID = 1541835086138187846
 CHANNEL_TICKET = 1541859646720184391
@@ -122,6 +122,27 @@ class TicketControlView(nextcord.ui.View):
         super().__init__(timeout=None)
         self.applicant_id = applicant_id
 
+    async def interaction_check(self, interaction: nextcord.Interaction) -> bool:
+        """
+        Проверяет, имеет ли пользователь право управлять этой заявкой.
+        Доступ разрешен Администраторам и пользователям с ролью ROLE_TO_PING_ID.
+        """
+        # Если пользователь администратор, разрешаем доступ
+        if interaction.user.guild_permissions.administrator:
+            return True
+            
+        # Проверяем наличие роли рекрутера/модератора по ID
+        allowed_role = interaction.guild.get_role(ROLE_TO_PING_ID)
+        if allowed_role and allowed_role in interaction.user.roles:
+            return True
+            
+        # Если проверки не пройдены, отправляем скрытое сообщение и блокируем действие
+        await interaction.response.send_message(
+            "❌ У вас нет прав для взаимодействия с этой заявкой.", 
+            ephemeral=True
+        )
+        return False
+
     @nextcord.ui.button(label="Принять", style=nextcord.ButtonStyle.green, custom_id="ticket_accept")
     async def accept(self, button: nextcord.ui.Button, interaction: nextcord.Interaction):
         await interaction.response.defer()
@@ -133,7 +154,7 @@ class TicketControlView(nextcord.ui.View):
         if member and role:
             try:
                 await member.add_roles(role)
-                await interaction.channel.send(f"🎉 {member.mention} был успешно принят в семью and получил роль {role.name}!")
+                await interaction.channel.send(f"🎉 {member.mention} был успешно принят в семью и получил роль {role.name}!")
                 await member.send(f"✨ Поздравляем! Ваша заявка в семью на сервере **{guild.name}** одобрена модератором {interaction.user}. Вам выдана роль **{role.name}**.")
             except nextcord.Forbidden:
                 await interaction.channel.send("⚠️ Бот не смог отправить сообщение в ЛС пользователю (закрыта личка).")
@@ -223,8 +244,7 @@ class TicketControlView(nextcord.ui.View):
         if member:
             voice_mention = voice_channel.mention if voice_channel else "голосовой канал"
             await interaction.channel.send(
-                f"📞 {member.mention}, вас вызывает на обзвон администратор {interaction.user.mention}!
-"
+                f"📞 {member.mention}, вас вызывает на обзвон администратор {interaction.user.mention}!"
                 f"Пожалуйста, зайдите в {voice_mention}."
             )
         else:
@@ -271,7 +291,8 @@ async def rectop(interaction: nextcord.Interaction):
             medal = "🥇" if position == 1 else "🥈" if position == 2 else "🥉" if position == 3 else f"**{position}.**"
             word = "заявка" if count == 1 else "заявки" if 2 <= count <= 4 else "заявок"
             lines.append(f"{medal} {name} — **{count} {word}**")
-        embed.description = "\n".join(lines)
+        embed.description = "
+".join(lines)
     embed.set_footer(text="Статистика за последние 7 дней")
     await interaction.followup.send(embed=embed)
 
@@ -305,6 +326,110 @@ async def on_ready():
     
     # Регистрируем View для персистентности (чтобы кнопки работали после перезагрузки)
     bot.add_view(StartAppView())
+    
+@bot.event
+async def on_member_join(member: nextcord.Member):
+
+    logger.info("========================================")
+    logger.info("СРАБОТАЛО СОБЫТИЕ on_member_join")
+    logger.info(f"Пользователь: {member}")
+    logger.info(f"Имя: {member.name}")
+    logger.info(f"ID пользователя: {member.id}")
+    logger.info(f"Сервер: {member.guild.name}")
+    logger.info(f"ID сервера: {member.guild.id}")
+    logger.info("========================================")
+
+    # Получаем канал
+    logger.info(
+        f"Ищу канал с ID: {WELCOME_CHANNEL_ID}"
+    )
+
+    channel = member.guild.get_channel(
+        WELCOME_CHANNEL_ID
+    )
+
+    # Канал не найден
+    if channel is None:
+
+        logger.error(
+            "❌ КАНАЛ НЕ НАЙДЕН!"
+        )
+
+        logger.error(
+            f"Проверь WELCOME_CHANNEL_ID: "
+            f"{WELCOME_CHANNEL_ID}"
+        )
+
+        return
+
+    logger.info(
+        f"✅ Канал найден: #{channel.name}"
+    )
+
+    # =========================
+    # СОЗДАЁМ EMBED
+    # =========================
+
+    embed = nextcord.Embed(
+        title="Добро пожаловать на server SHIZO family",
+
+        description=(
+            f"{member.mention}, чтобы подать заявку "
+            f"в нашу семью зайди в канал "
+            f"<#1541859646720184391>"
+        ),
+
+        color=0x800000
+    )
+
+    logger.info(
+        "Embed создан"
+    )
+
+    # =========================
+    # ОТПРАВКА
+    # =========================
+
+    try:
+
+        logger.info(
+            f"Пытаюсь отправить Embed "
+            f"в #{channel.name}"
+        )
+
+        message = await channel.send(
+            embed=embed
+        )
+
+        logger.info(
+            f"✅ EMBED ОТПРАВЛЕН!"
+        )
+
+        logger.info(
+            f"ID сообщения: {message.id}"
+        )
+
+    except nextcord.Forbidden:
+
+        logger.error(
+            "❌ Discord запретил отправку сообщения!"
+        )
+
+        logger.error(
+            "Проверь права Send Messages и Embed Links."
+        )
+
+    except nextcord.HTTPException as error:
+
+        logger.error(
+            f"❌ Ошибка Discord API: {error}"
+        )
+
+    except Exception as error:
+
+        logger.exception(
+            f"❌ НЕИЗВЕСТНАЯ ОШИБКА: {error}"
+        )
 
 # =========================
 # ЗАПУСК БОТА
