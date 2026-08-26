@@ -3,3 +3,4 @@ requests
 nextcord
 sys
 logging
+asyncio
