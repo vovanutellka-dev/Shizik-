@@ -1,18 +1,20 @@
 import nextcord
 from nextcord.ext import commands
 from nextcord import SlashOption
+from nextcord.ui import Button, View, Modal, TextInput
 import logging
 import sys
 import asyncio
 import re
-from datetime import datetime, timedelta, timezone
+import datetime
+from datetime import timedelta, timezone
 from collections import Counter
 
 # =========================
 # НАСТРОЙКИ И КОНСТАНТЫ
 # =========================
 # ⚠️ ВНИМАНИЕ: Замените этот токен на НОВЫЙ! Старый токен из вашего вопроса заблокирован или небезопасен.
-TOKEN = "ВАШ_НОВЫЙ_ТОКЕН_БОТА"
+TOKEN = ""
 
 WELCOME_CHANNEL_ID = 1541835086138187846
 CHANNEL_TICKET = 1541859646720184391
@@ -368,6 +370,124 @@ async def on_member_join(member: nextcord.Member):
         logger.info(f"✅ Приветствие для {member.name} отправлено.")
     except Exception as error:
         logger.error(f"❌ Ошибка отправки приветствия: {error}")
+
+# Глобальный словарь для хранения данных об АФК
+# В продакшене лучше использовать базу данных, чтобы данные не пропадали при перезапуске.
+# Структура: {user_id: {"timestamp": int, "reason": str}}
+afk_users = {}
+
+def create_afk_embed():
+    """Функция для сборки и обновления эмбеда со списком АФК."""
+    embed = nextcord.Embed(
+        title="📌 Список АФК",
+        color=nextcord.Color.orange(),
+        description="Ниже представлен список участников, которые сейчас отошли."
+    )
+    
+    if not afk_users:
+        embed.add_field(name="Статус", value="В данный момент никто не находится в АФК.", inline=False)
+    else:
+        mentions = []
+        reasons = []
+        times = []
+        
+        for user_id, data in afk_users.items():
+            mentions.append(f"<@{user_id}>")
+            reasons.append(data["reason"])
+            times.append(f"<t:{data['timestamp']}:R>")  # Относительное время Discord
+            
+        embed.add_field(name="Участник", value="\n".join(mentions), inline=True)
+        embed.add_field(name="Причина", value="\n".join(reasons), inline=True)
+        embed.add_field(name="Ушел", value="\n".join(times), inline=True)
+        
+    return embed
+
+
+class AFKReasonModal(Modal):
+    """Модальное окно (форма) для ввода причины АФК."""
+    def __init__(self):
+        super().__init__(title="Вход в АФК статус")
+        
+        self.reason_input = TextInput(
+            label="Укажите причину",
+            placeholder="Например: Пошел пить чай / Обед",
+            required=True,
+            max_length=100
+        )
+        self.add_item(self.reason_input)
+
+    async def callback(self, interaction: nextcord.Interaction):
+        user_id = interaction.user.id
+        reason = self.reason_input.value
+        timestamp = int(datetime.datetime.now().timestamp())
+        
+        # Записываем пользователя в список
+        afk_users[user_id] = {
+            "reason": reason,
+            "timestamp": timestamp
+        }
+        
+        # Генерируем новый эмбед
+        new_embed = create_afk_embed()
+        
+        # КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Мы отвечаем на отправку формы, 
+        # обновляя само сообщение, к которому привязана эта форма.
+        await interaction.response.edit_message(embed=new_embed)
+        
+        # Опционально: отправляем пользователю отдельное скрытое сообщение-подтверждение
+        await interaction.followup.send(f"Вы успешно вошли в АФК с причиной: *{reason}*", ephemeral=True)
+
+
+class AFKView(View):
+    """Панель с кнопками под эмбедом."""
+    def __init__(self):
+        super().__init__(timeout=None) # Чтобы кнопки не отключались
+
+    @nextcord.ui.button(label="Встать АФК", style=nextcord.ButtonStyle.green, custom_id="afk_join_btn")
+    async def join_afk(self, button: Button, interaction: nextcord.Interaction):
+        if interaction.user.id in afk_users:
+            await interaction.response.send_message("Вы уже находитесь в списке АФК!", ephemeral=True)
+            return
+            
+        # Теперь нам не нужно передавать сообщение внутрь модалки, 
+        # так как interaction внутри callback модалки сам знает, откуда он пришел.
+        await interaction.response.send_modal(AFKReasonModal())
+
+    @nextcord.ui.button(label="Выйти с АФК", style=nextcord.ButtonStyle.red, custom_id="afk_leave_btn")
+    async def leave_afk(self, button: Button, interaction: nextcord.Interaction):
+        user_id = interaction.user.id
+        
+        if user_id not in afk_users:
+            await interaction.response.send_message("Вас и так нет в списке АФК.", ephemeral=True)
+            return
+            
+        del afk_users[user_id]
+        
+        new_embed = create_afk_embed()
+        # Для кнопки выхода тоже используем edit_message для стабильности
+        await interaction.response.edit_message(embed=new_embed)
+        
+        await interaction.followup.send("Вы успешно вышли из АФК статуса!", ephemeral=True)
+
+
+
+@bot.event
+async def on_ready():
+    print(f"Бот {bot.user.name} успешно запущен и готов к работе!")
+
+@bot.command(name="setupafk")
+@commands.has_permissions(administrator=True)  # Ограничение: команду могут вызывать только админы
+async def setup_afk(ctx):
+    # Создаем стартовый эмбед и прикрепляем кнопки
+    embed = create_afk_embed()
+    view = AFKView()
+    
+    await ctx.send(embed=embed, view=view)
+    # Удаляем команду автора, чтобы не засорять чат (по желанию)
+    await ctx.message.delete()
+
+
+
 
 # =========================
 # ЗАПУСК БОТА
